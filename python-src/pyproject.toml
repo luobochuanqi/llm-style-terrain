@@ -12,4 +12,5 @@ dependencies = [
     "diffusers>=0.20.0",
     "accelerate>=0.20.0",
     "transformers>=4.30.0",
+    "httpx[socks]>=0.28.1",
 ]
