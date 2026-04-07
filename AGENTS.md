@@ -11,8 +11,9 @@ Python project for generating terrain heightmaps: Perlin noise → SDXL image-to
 │   ├── main.py          # Entry point
 │   ├── src/
 │   │   ├── config.py    # Dataclass config (GeneratorConfig, DiffusionConfig, OutputConfig)
-│   │   ├── generators/  # Perlin noise generation
-│   │   └── diffusion/   # SDXL inference
+│   │   ├── generators/  # Perlin noise generation (perlin.py)
+│   │   ├── diffusion/   # SDXL inference (sdxl_inference.py)
+│   │   └── mapgen/      # DiT-based heightmap generation (experimental)
 │   ├── outputs/         # Generated files (gitignored)
 │   └── .venv/           # Virtual env (gitignored)
 ```
@@ -36,6 +37,7 @@ uv sync
 - **Python 3.11+** (specified in `.python-version`)
 - **GPU required** for SDXL inference (uses `torch` with CUDA)
 - Uses `uv` for dependency management, not pip
+- **No test suite yet** - tests directory does not exist
 
 ## Configuration
 
