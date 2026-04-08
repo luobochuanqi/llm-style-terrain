@@ -15,4 +15,5 @@ dependencies = [
     "httpx[socks]>=0.28.1",
     "matplotlib>=3.10.8",
     "opencv-python>=4.8.0",
+    "peft>=0.18.1",
 ]

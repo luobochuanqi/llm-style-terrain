@@ -21,3 +21,4 @@ models/
 .cache/
 
 assets/GameLandscapeHeightmap512_V1.0.safetensors
+assets/gameLandscape_gameLandscapeHeightmap.safetensors

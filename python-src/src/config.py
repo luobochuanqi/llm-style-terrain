@@ -142,6 +142,9 @@ class OutputConfig:
     heightmapstyle_dir: Path = field(
         default_factory=lambda: Path("outputs/heightmapstyle")
     )
+    gamelandscape_dir: Path = field(
+        default_factory=lambda: Path("outputs/gamelandscape")
+    )
     mapgen_dir: Path = field(default_factory=lambda: Path("outputs/mapgen"))
 
     # 文件名
