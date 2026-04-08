@@ -7,8 +7,8 @@ import sys
 from pathlib import Path
 import numpy as np
 
-# 添加项目根目录到路径
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# 将 python-src 加入路径，保持 src 作为包
+sys.path.insert(0, str(Path(__file__).parent))
 
 from src.config import Config, ControlNetConfig
 from src.generators import PerlinHeightmapGenerator
@@ -33,14 +33,15 @@ def run_controlnet_workflow():
     config.controlnet.guidance_scale = 5.0
 
     # 确保输出目录存在
-    config.output.output_dir.mkdir(parents=True, exist_ok=True)
+    config.output.perlin_dir.mkdir(parents=True, exist_ok=True)
+    config.output.controlnet_dir.mkdir(parents=True, exist_ok=True)
 
     # 步骤 1: 生成 Perlin 噪声高度图
     print("\n【步骤 1/3】生成 Perlin 噪声高度图")
     print("-" * 60)
 
     generator = PerlinHeightmapGenerator(config.generator)
-    heightmap_path = config.output.output_dir / "heightmap_perlin.raw"
+    heightmap_path = config.output.perlin_dir / "heightmap.raw"
     heightmap = generator.generate_and_save(heightmap_path)
 
     print(f"高度图尺寸：{heightmap.shape}")
@@ -55,12 +56,12 @@ def run_controlnet_workflow():
 
     # 生成 Canny 边缘图（用于调试）
     canny_image = inferencer.heightmap_to_canny(heightmap)
-    canny_path = config.output.output_dir / "canny_edges.png"
+    canny_path = config.output.controlnet_dir / "canny_edges.png"
     canny_image.save(canny_path)
     print(f"✅ Canny 边缘图已保存：{canny_path}")
 
     # 执行 ControlNet 推理
-    controlnet_path = config.output.output_dir / "heightmap_controlnet.png"
+    controlnet_path = config.output.controlnet_dir / "heightmap.png"
     refined_heightmap = inferencer.refine_heightmap(heightmap, controlnet_path)
 
     print(f"微调后高度图尺寸：{refined_heightmap.shape}")
@@ -139,8 +140,9 @@ def compare_controlnet_strength():
         )
 
         inferencer = SDXLControlNetInference(config)
-        output_path = Path(f"outputs/controlnet_strength_{strength}.png")
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+        strength_test_dir = config.output.controlnet_dir / "strength_test"
+        strength_test_dir.mkdir(parents=True, exist_ok=True)
+        output_path = strength_test_dir / f"controlnet_strength_{strength}.png"
 
         refined = inferencer.refine_heightmap(heightmap, output_path)
         inferencer.unload_model()

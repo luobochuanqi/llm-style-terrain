@@ -19,3 +19,5 @@ outputs/
 # Model cache
 models/
 .cache/
+
+assets/GameLandscapeHeightmap512_V1.0.safetensors

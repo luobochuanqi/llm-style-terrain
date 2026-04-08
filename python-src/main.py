@@ -27,11 +27,12 @@ def run_workflow():
     print("=" * 60)
 
     # 确保输出目录存在
-    config.output.output_dir.mkdir(parents=True, exist_ok=True)
+    config.output.perlin_dir.mkdir(parents=True, exist_ok=True)
+    config.output.diffusion_dir.mkdir(parents=True, exist_ok=True)
 
-    heightmap_path = config.output.output_dir / config.output.heightmap_filename
+    heightmap_path = config.output.perlin_dir / config.output.heightmap_filename
     preview_path = heightmap_path.with_suffix(".png")
-    diffusion_path = config.output.output_dir / config.output.diffusion_filename
+    diffusion_path = config.output.diffusion_dir / config.output.diffusion_filename
 
     # 步骤 1: 生成 Perlin 噪声高度图（如果不存在则跳过）
     print("\n【步骤 1/2】生成 Perlin 噪声高度图")
@@ -67,7 +68,7 @@ def run_workflow():
     print("✅ 全部流程完成！")
     print("=" * 60)
     print(f"\n输出文件:")
-    print(f"  - 原始噪声高度图：{heightmap_path.absolute()}")
+    print(f"  - Perlin 噪声高度图：{heightmap_path.absolute()}")
     print(f"  - SDXL 微调高度图：{diffusion_path.absolute()}")
 
     # 卸载模型释放显存

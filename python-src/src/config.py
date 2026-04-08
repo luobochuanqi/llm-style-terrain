@@ -132,9 +132,21 @@ class ControlNetConfig:
 class OutputConfig:
     """输出配置"""
 
-    output_dir: Path = field(default_factory=lambda: Path("outputs"))
-    heightmap_filename: str = "heightmap_perlin.raw"
-    diffusion_filename: str = "heightmap_diffusion.png"
+    # 主输出目录
+    base_dir: Path = field(default_factory=lambda: Path("outputs"))
+
+    # 各模块输出子目录
+    perlin_dir: Path = field(default_factory=lambda: Path("outputs/perlin"))
+    diffusion_dir: Path = field(default_factory=lambda: Path("outputs/diffusion"))
+    controlnet_dir: Path = field(default_factory=lambda: Path("outputs/controlnet"))
+    heightmapstyle_dir: Path = field(
+        default_factory=lambda: Path("outputs/heightmapstyle")
+    )
+    mapgen_dir: Path = field(default_factory=lambda: Path("outputs/mapgen"))
+
+    # 文件名
+    heightmap_filename: str = "heightmap.raw"
+    diffusion_filename: str = "heightmap.png"
     enable_preview: bool = False  # 是否生成后用 matplotlib 预览
 
 

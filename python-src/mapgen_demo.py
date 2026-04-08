@@ -257,7 +257,7 @@ def run_mapgen_demo():
     # 步骤 4: 保存结果
     print("\n【步骤 4/4】保存结果")
     print("-" * 60)
-    output_dir = Path("outputs/mapgen_demo")
+    output_dir = Path("outputs/mapgen")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     layout_path = output_dir / "layout.png"
