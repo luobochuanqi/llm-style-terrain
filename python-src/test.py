@@ -35,7 +35,7 @@ T = 1
 n_steps = 200
 
 plt.figure(figsize=(10, 6))
-for _ in range(10):
+for _ in range(20):
     t, X = simulate_brownian_bridge(a, b, T, n_steps)
     plt.plot(t, X, alpha=0.7)
 
