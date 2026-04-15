@@ -107,7 +107,13 @@ def run_interpolation_demo(config: TrainingConfig, checkpoint_path: str):
 
     device = torch.device(config.device)
     model = model.to(device)
-    model.load_checkpoint(checkpoint_path, device)
+
+    # 加载检查点 (移除 Sobel buffer)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    state_dict = checkpoint["model_state_dict"].copy()
+    state_dict.pop("sobel_x", None)
+    state_dict.pop("sobel_y", None)
+    model.load_state_dict(state_dict, strict=False)
     model.eval()
 
     # 定义丹霞和喀斯特的典型条件向量 (已归一化的近似值)

@@ -4,7 +4,9 @@
 """
 
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau
 from pathlib import Path
 from typing import Optional, Dict
 import time
@@ -47,6 +49,7 @@ class Trainer:
             "val_loss": [],
             "recon_loss": [],
             "kl_loss": [],
+            "grad_loss": [],
             "beta": [],
             "lr": [],
         }
@@ -57,6 +60,15 @@ class Trainer:
             warmup_epochs=config.beta_warmup_epochs,
         )
 
+        # Learning rate scheduler (在 configure_optimizers 后初始化)
+        self.lr_scheduler = None
+
+        # Gradient loss (Sobel edge detection)
+        self.sobel_x: Optional[torch.Tensor] = None
+        self.sobel_y: Optional[torch.Tensor] = None
+        if self.config.use_gradient_loss:
+            self._init_gradient_loss()
+
     def train_one_epoch(self) -> Dict[str, float]:
         """训练一个 epoch"""
         self.model.train()
@@ -64,21 +76,26 @@ class Trainer:
         total_loss = 0.0
         total_recon = 0.0
         total_kl = 0.0
+        total_grad = 0.0
         num_batches = len(self.train_loader)
 
         for batch_idx, (conditions, heightmaps, _, _) in enumerate(self.train_loader):
-            # 移动到设备
             conditions = conditions.to(self.config.device)
             heightmaps = heightmaps.to(self.config.device)
 
-            # 前向传播
             recon, losses = self.model(heightmaps, conditions)
 
-            # 反向传播
+            # Add gradient loss if enabled
+            grad_loss = torch.tensor(0.0, device=self.config.device)
+            if self.config.use_gradient_loss:
+                grad_loss = self._compute_gradient_loss(recon, heightmaps)
+                losses["loss_total"] = (
+                    losses["loss_total"] + self.config.gradient_loss_weight * grad_loss
+                )
+
             self.model.optimizer.zero_grad()
             losses["loss_total"].backward()
 
-            # 梯度裁剪
             if self.config.gradient_clip > 0:
                 torch.nn.utils.clip_grad_norm_(
                     self.model.parameters(),
@@ -87,31 +104,32 @@ class Trainer:
 
             self.model.optimizer.step()
 
-            # 累积损失
             total_loss += losses["loss_total"].item()
             total_recon += losses["loss_recon"].item()
             total_kl += losses["loss_kl"].item()
+            total_grad += grad_loss.item()
 
-            # 记录日志
             if (batch_idx + 1) % self.config.log_every == 0:
                 avg_loss = total_loss / (batch_idx + 1)
                 avg_recon = total_recon / (batch_idx + 1)
                 avg_kl = total_kl / (batch_idx + 1)
+                avg_grad = total_grad / (batch_idx + 1)
 
                 print(
                     f"Epoch {self.current_epoch + 1} [{batch_idx + 1}/{num_batches}] "
-                    f"Loss: {avg_loss:.4f} | Recon: {avg_recon:.4f} | KL: {avg_kl:.4f}"
+                    f"Loss: {avg_loss:.4f} | Recon: {avg_recon:.4f} | KL: {avg_kl:.4f} | Grad: {avg_grad:.4f}"
                 )
 
-        # 计算平均损失
         avg_loss = total_loss / num_batches
         avg_recon = total_recon / num_batches
         avg_kl = total_kl / num_batches
+        avg_grad = total_grad / num_batches
 
         return {
             "train_loss": avg_loss,
             "recon_loss": avg_recon,
             "kl_loss": avg_kl,
+            "grad_loss": avg_grad,
         }
 
     @torch.no_grad()
@@ -122,30 +140,35 @@ class Trainer:
         total_loss = 0.0
         total_recon = 0.0
         total_kl = 0.0
+        total_grad = 0.0
         num_batches = len(self.val_loader)
 
         for conditions, heightmaps, _, _ in self.val_loader:
-            # 移动到设备
             conditions = conditions.to(self.config.device)
             heightmaps = heightmaps.to(self.config.device)
 
-            # 前向传播
             recon, losses = self.model(heightmaps, conditions)
 
-            # 累积损失
+            grad_loss = torch.tensor(0.0, device=self.config.device)
+            if self.config.use_gradient_loss:
+                grad_loss = self._compute_gradient_loss(recon, heightmaps)
+                total_loss += grad_loss.item() * self.config.gradient_loss_weight
+
             total_loss += losses["loss_total"].item()
             total_recon += losses["loss_recon"].item()
             total_kl += losses["loss_kl"].item()
+            total_grad += grad_loss.item()
 
-        # 计算平均损失
         avg_loss = total_loss / num_batches
         avg_recon = total_recon / num_batches
         avg_kl = total_kl / num_batches
+        avg_grad = total_grad / num_batches
 
         return {
             "val_loss": avg_loss,
             "val_recon": avg_recon,
             "val_kl": avg_kl,
+            "val_grad": avg_grad,
         }
 
     def run_training(self):
@@ -168,6 +191,28 @@ class Trainer:
             weight_decay=self.config.weight_decay,
         )
 
+        # 配置学习率调度器
+        if self.config.lr_scheduler_type == "cosine":
+            self.lr_scheduler = CosineAnnealingLR(
+                self.model.optimizer,  # type: ignore
+                T_max=self.config.num_epochs,
+                eta_min=self.config.lr_min,
+            )
+            print(
+                f"✅ 使用 Cosine Annealing 学习率调度器 (T_max={self.config.num_epochs}, eta_min={self.config.lr_min})"
+            )
+        elif self.config.lr_scheduler_type == "plateau":
+            self.lr_scheduler = ReduceLROnPlateau(
+                self.model.optimizer,  # type: ignore
+                mode="min",
+                factor=0.5,
+                patience=20,
+                min_lr=self.config.lr_min,
+            )
+            print(f"✅ 使用 ReduceLROnPlateau 学习率调度器")
+        else:
+            print(f"⚠️  未使用学习率调度器 (固定 LR={self.config.learning_rate})")
+
         # 训练循环
         start_time = time.time()
 
@@ -187,13 +232,22 @@ class Trainer:
                 val_metrics = self.validate()
 
                 # 更新学习率
-                current_lr = self.model.optimizer.param_groups[0]["lr"]
+                if self.lr_scheduler is not None:
+                    if self.config.lr_scheduler_type == "plateau":
+                        self.lr_scheduler.step(val_metrics["val_loss"])  # type: ignore
+                    else:  # cosine or none
+                        self.lr_scheduler.step()  # type: ignore
+
+                current_lr = self.model.optimizer.param_groups[0]["lr"]  # type: ignore
 
                 # 记录历史
                 self.training_history["train_loss"].append(train_metrics["train_loss"])
                 self.training_history["val_loss"].append(val_metrics["val_loss"])
                 self.training_history["recon_loss"].append(train_metrics["recon_loss"])
                 self.training_history["kl_loss"].append(train_metrics["kl_loss"])
+                self.training_history["grad_loss"].append(
+                    train_metrics.get("grad_loss", 0.0)
+                )
                 self.training_history["beta"].append(current_beta)
                 self.training_history["lr"].append(current_lr)
 
@@ -209,6 +263,7 @@ class Trainer:
                 print(
                     f"Recon: {train_metrics['recon_loss']:.4f} | "
                     f"KL: {train_metrics['kl_loss']:.4f} | "
+                    f"Grad: {train_metrics.get('grad_loss', 0.0):.4f} | "
                     f"Beta: {current_beta:.4f}"
                 )
 
@@ -279,6 +334,49 @@ class Trainer:
 
         return self.training_history
 
+    def _init_gradient_loss(self):
+        """初始化 Sobel 算子用于梯度损失"""
+        sobel_x = torch.tensor(
+            [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]],
+            dtype=torch.float32,
+            device=self.config.device,
+        ).view(1, 1, 3, 3)
+        sobel_y = torch.tensor(
+            [[-1, -2, -1], [0, 0, 0], [1, 2, 1]],
+            dtype=torch.float32,
+            device=self.config.device,
+        ).view(1, 1, 3, 3)
+
+        self.model.register_buffer("sobel_x", sobel_x)
+        self.model.register_buffer("sobel_y", sobel_y)
+
+    def _compute_gradient_loss(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+    ) -> torch.Tensor:
+        """计算梯度损失 (Sobel edge detection)
+
+        Args:
+            pred: 预测图像 (batch, 1, H, W)
+            target: 目标图像 (batch, 1, H, W)
+
+        Returns:
+            gradient loss (scalar)
+        """
+        sobel_x = self.model.get_buffer("sobel_x")  # type: ignore
+        sobel_y = self.model.get_buffer("sobel_y")  # type: ignore
+
+        pred_grad_x = F.conv2d(pred, sobel_x, padding=1)
+        pred_grad_y = F.conv2d(pred, sobel_y, padding=1)
+        target_grad_x = F.conv2d(target, sobel_x, padding=1)
+        target_grad_y = F.conv2d(target, sobel_y, padding=1)
+
+        grad_loss_x = F.mse_loss(pred_grad_x, target_grad_x)
+        grad_loss_y = F.mse_loss(pred_grad_y, target_grad_y)
+
+        return grad_loss_x + grad_loss_y
+
 
 class BetaWarmupScheduler:
     """Beta 热身调度器
@@ -295,5 +393,4 @@ class BetaWarmupScheduler:
         if epoch >= self.warmup_epochs:
             return self.max_beta
         else:
-            # 线性增加
             return self.max_beta * epoch / self.warmup_epochs

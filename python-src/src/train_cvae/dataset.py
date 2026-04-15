@@ -170,9 +170,9 @@ class ConditionNormalizer:
 
 
 class TerrainDataset(Dataset):
-    """地形高度图数据集
+    """PyTorch 地形数据集
 
-    从 CSV 文件加载图像和条件向量，支持安全增强
+    从 features.csv 和 split files 加载数据
     """
 
     def __init__(
@@ -182,6 +182,8 @@ class TerrainDataset(Dataset):
         image_size: int = 256,
         augment: bool = True,
         log_transform_c: bool = True,
+        features_csv: Optional[Path] = None,
+        splits_dir: Optional[Path] = None,
     ):
         """
         Args:
@@ -196,18 +198,31 @@ class TerrainDataset(Dataset):
         self.image_size = image_size
         self.augment = augment and (split == "train")
 
-        # 加载 split 信息
-        split_csv = self.data_root / "splits" / f"{split}.csv"
+        # 支持自定义 splits 目录
+        if splits_dir is not None:
+            split_csv = Path(splits_dir) / f"{split}.csv"
+        else:
+            split_csv = self.data_root / "splits" / f"{split}.csv"
+
         if not split_csv.exists():
             raise FileNotFoundError(f"Split file not found: {split_csv}")
 
         self.split_df = pd.read_csv(split_csv)
 
-        # 加载 features - matches 需要匹配 path 列而非 filename
-        features_csv = self.data_root / "features.csv"
-        if not features_csv.exists():
-            features_csv = self.data_root.parent / "preprocess" / "features.csv"
-        features_df = pd.read_csv(features_csv)
+        # 支持自定义 features 文件
+        if features_csv is not None:
+            features_csv_path = Path(features_csv)
+        else:
+            features_csv_path = self.data_root / "features.csv"
+            if not features_csv_path.exists():
+                features_csv_path = (
+                    self.data_root.parent / "preprocess" / "features.csv"
+                )
+
+        if not features_csv_path.exists():
+            raise FileNotFoundError(f"Features file not found: {features_csv_path}")
+
+        features_df = pd.read_csv(features_csv_path)
 
         # splits 的 path 列已经包含完整路径 (normalized/train/xxx.png)
         # features 的 filename 列也是完整路径
@@ -251,8 +266,30 @@ class TerrainDataset(Dataset):
         row = self.data_df.iloc[idx]
 
         # 加载图像
-        img_path = self.data_root / row["path"]
-        image = Image.open(img_path)
+        # 使用绝对路径，避免工作目录问题
+        img_path_str = str(row["path"])
+
+        # 尝试多个可能的路径
+        possible_paths = [
+            # 项目根目录/data/...
+            Path(
+                "/home/luobo/mine/projects/llm-style-terrain/data/training-dataset/preprocess"
+            )
+            / img_path_str,
+            # 相对路径
+            Path("../data/training-dataset/preprocess") / img_path_str,
+        ]
+
+        image = None
+        for img_path in possible_paths:
+            if img_path.exists():
+                image = Image.open(img_path)
+                break
+
+        if image is None:
+            raise FileNotFoundError(
+                f"无法找到图像：{img_path_str}, 尝试的路径：{possible_paths}"
+            )
 
         # 转换为张量 (16-bit PNG → float32 [0, 1])
         img_array = np.array(image)
@@ -324,6 +361,9 @@ def create_dataloader(
     config,
     split: str = "train",
     augment: bool = True,
+    data_root: Optional[Path] = None,
+    features_csv: Optional[Path] = None,
+    splits_dir: Optional[Path] = None,
 ):
     """创建 DataLoader
 
@@ -331,18 +371,36 @@ def create_dataloader(
         config: 训练配置
         split: 数据集划分
         augment: 是否应用增强
+        data_root: 自定义数据根目录（可选）
+        features_csv: 自定义 features 文件（可选）
+        splits_dir: 自定义 splits 目录（可选）
 
     Returns:
         dataloader: DataLoader
         dataset: TerrainDataset
     """
+    # 使用自定义路径或配置中的默认路径
     dataset = TerrainDataset(
-        data_root=config.data_root,
+        data_root=data_root or config.data_root,
         split=split,
         image_size=config.image_size,
         augment=augment,
         log_transform_c=config.log_transform_c,
     )
+
+    # 支持自定义 features 和 splits 路径
+    if features_csv is not None or splits_dir is not None:
+        # 重新加载数据集，使用自定义路径
+        dataset_custom = TerrainDataset(
+            data_root=data_root or config.data_root,
+            split=split,
+            image_size=config.image_size,
+            augment=augment,
+            log_transform_c=config.log_transform_c,
+            features_csv=features_csv,
+            splits_dir=splits_dir,
+        )
+        return dataset_custom
 
     # 训练集使用加权采样
     if split == "train" and config.use_weighted_sampling:
@@ -370,3 +428,122 @@ def create_dataloader(
     )
 
     return dataloader, dataset
+
+
+def create_data_loaders(
+    data_root: Path,
+    features_csv: Path,
+    splits_dir: Path,
+    batch_size: int = 8,
+    num_workers: int = 2,
+    image_size: int = 256,
+    log_transform_c: bool = True,
+    augment_hflip: bool = True,
+    augment_rotate_90: bool = True,
+    augment_small_rotate: bool = True,
+    use_weighted_sampling: bool = True,
+    danxia_weight: float = 1.0,
+    kasite_weight: float = 1.15,
+):
+    """创建 train 和 val 数据加载器
+
+    Args:
+        data_root: 数据根目录（normalized_512 等）
+        features_csv: features 文件路径
+        splits_dir: splits 目录
+        batch_size: batch size
+        num_workers: 数据加载 worker 数
+        image_size: 图像尺寸
+        log_transform_c: 是否对 C_score 做 log 变换
+        augment_hflip: 水平翻转
+        augment_rotate_90: 90 度旋转
+        augment_small_rotate: 小角度旋转
+        use_weighted_sampling: 是否使用加权采样
+        danxia_weight: 丹霞权重
+        kasite_weight: 喀斯特权重
+
+    Returns:
+        train_loader, val_loader
+    """
+    from torch.utils.data import DataLoader, WeightedRandomSampler
+    from typing import Optional
+
+    # 创建临时配置对象（简化版）
+    class SimpleConfig:
+        def __init__(self):
+            self.data_root = data_root
+            self.image_size = image_size
+            self.batch_size = batch_size
+            self.num_workers = num_workers
+            self.log_transform_c = log_transform_c
+            self.use_weighted_sampling = use_weighted_sampling
+            self.danxia_weight = danxia_weight
+            self.kasite_weight = kasite_weight
+
+    config = SimpleConfig()
+
+    # 创建训练集
+    train_dataset = TerrainDataset(
+        data_root=data_root,
+        split="train",
+        image_size=image_size,
+        augment=True,
+        log_transform_c=log_transform_c,
+        features_csv=features_csv,
+        splits_dir=splits_dir,
+    )
+
+    # 创建验证集
+    val_dataset = TerrainDataset(
+        data_root=data_root,
+        split="val",
+        image_size=image_size,
+        augment=False,
+        log_transform_c=log_transform_c,
+        features_csv=features_csv,
+        splits_dir=splits_dir,
+    )
+
+    # 加权采样 - 从 dataframe 读取，不触发 __getitem__
+    if use_weighted_sampling:
+        weights = []
+        for idx in range(len(train_dataset.data_df)):
+            row = train_dataset.data_df.iloc[idx]
+            terrain_type = row.get("type", "")
+            filename = row.get("filename", "")
+            if "danxia" in terrain_type.lower() or "danxia" in filename.lower():
+                weights.append(danxia_weight)
+            else:
+                weights.append(kasite_weight)
+
+        sampler = WeightedRandomSampler(
+            weights=weights,
+            num_samples=len(weights),
+            replacement=True,
+        )
+        train_shuffle = False
+    else:
+        sampler = None
+        train_shuffle = True
+
+    # 创建 DataLoader
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=train_shuffle,
+        sampler=sampler,
+        num_workers=num_workers,
+        pin_memory=True,
+        drop_last=True,
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True,
+        drop_last=False,
+    )
+
+    return train_loader, val_loader

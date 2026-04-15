@@ -42,6 +42,18 @@ class Visualizer:
         ax.legend()
         ax.grid(True, alpha=0.3)
 
+        # 限制 y 轴范围，排除异常值
+        import numpy as np
+
+        val_loss_clean = [
+            x
+            for x in history["val_loss"]
+            if x < np.percentile(history["val_loss"], 95) * 10
+        ]
+        if len(val_loss_clean) > 0:
+            max_loss = max(max(history["train_loss"]), max(val_loss_clean))
+            ax.set_ylim(0, max_loss * 1.1)
+
         # 2. Recon & KL Loss
         ax = axes[0, 1]
         ax.plot(epochs, history["recon_loss"], "g-", label="Recon Loss", linewidth=2)

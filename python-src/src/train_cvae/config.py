@@ -42,24 +42,32 @@ class TrainingConfig:
     latent_dim: int = 128
     condition_dim: int = 3
     film_hidden_dim: int = 256  # FiLM style code 维度
-    beta: float = 3.0  # KL 损失权重 (从 4.0 降低到 3.0，避免过早正则化)
-    beta_warmup_epochs: int = 120  # β从 0 增加到 3.0 的 epoch 数 (大幅延长)
+    beta: float = 2.0  # KL 损失权重 (从 3.0 降低到 2.0，避免过早正则化)
+    beta_warmup_epochs: int = (
+        150  # β从 0 增加到 2.0 的 epoch 数 (延长以防止 KL 散度过高)
+    )
 
     # Training
     num_epochs: int = 200
     learning_rate: float = 1e-4
+    lr_min: float = 1e-6  # Cosine Annealing 最小学习率
+    lr_scheduler_type: str = "cosine"  # "cosine" | "plateau" | "none"
     weight_decay: float = 1e-5
     gradient_clip: float = 1.0
     device: str = "cuda"
 
     # Early stopping
-    early_stop_patience: Optional[int] = 40  # 从 20 增加到 40，给更多时间
+    early_stop_patience: Optional[int] = None  # 禁用早停，让训练完成 200 epochs
     min_delta: float = 1e-3
 
     # Weighted sampling
     use_weighted_sampling: bool = True
     danxia_weight: float = 1.0
     kasite_weight: float = 1.15  # 67/58 ≈ 1.15
+
+    # Gradient loss (Sobel edge enhancement)
+    use_gradient_loss: bool = True
+    gradient_loss_weight: float = 0.2  # λ=0.2, if unstable reduce to 0.1
 
     # Logging & visualization
     log_every: int = 10
@@ -79,9 +87,12 @@ class TrainingConfig:
         config = cls()
         config.mode = "fast"
         config.num_epochs = 50
+        config.beta = 2.0
         config.beta_warmup_epochs = 25
-        config.early_stop_patience = 10
+        config.early_stop_patience = None
         config.save_sample_every = 5
+        config.use_gradient_loss = True
+        config.lr_scheduler_type = "cosine"
         return config
 
     @classmethod
@@ -90,8 +101,11 @@ class TrainingConfig:
         config = cls()
         config.mode = "full"
         config.num_epochs = 200
-        config.beta_warmup_epochs = 120  # 延长 warmup
-        config.early_stop_patience = 40  # 增加耐心
+        config.beta = 2.0
+        config.beta_warmup_epochs = 150  # 延长 warmup
+        config.early_stop_patience = None  # 禁用早停
+        config.use_gradient_loss = True
+        config.lr_scheduler_type = "cosine"
         return config
 
     @classmethod
@@ -105,7 +119,9 @@ class TrainingConfig:
         config.batch_size = 2  # 更小的 batch size
         config.num_workers = 0
         config.learning_rate = 1e-5  # 更低的学习率防止 NaN
-        config.early_stop_patience = 100
+        config.early_stop_patience = None  # 禁用早停
+        config.use_gradient_loss = True
+        config.lr_scheduler_type = "none"  # 调试模式不使用调度器
         return config
 
     def __post_init__(self):

@@ -116,7 +116,12 @@ class TerrainGenerator:
             weights_only=False,
         )
 
-        model.load_state_dict(checkpoint["model_state_dict"])
+        # 移除 Sobel buffer (仅训练时使用，推理不需要)
+        state_dict = checkpoint["model_state_dict"].copy()
+        state_dict.pop("sobel_x", None)
+        state_dict.pop("sobel_y", None)
+
+        model.load_state_dict(state_dict, strict=False)
         model.to(self.device)
 
         print(f"✅ 模型加载成功 (epoch {checkpoint.get('epoch', 'unknown')})")

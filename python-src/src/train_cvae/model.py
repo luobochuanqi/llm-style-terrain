@@ -57,9 +57,9 @@ class ConditionNormalizer(nn.Module):
 class Encoder(nn.Module):
     """cVAE 编码器
 
-    将 256x256 图像压缩为 128 维隐空间向量
+    支持 256x256 和 512x512 两种分辨率
 
-    Architecture:
+    Architecture (256x256):
     Input: (1, 256, 256)
     → Conv2d(1, 32, 4, 2, 1) + BN + ReLU → (32, 128, 128)
     → Conv2d(32, 64, 4, 2, 1) + BN + ReLU → (64, 64, 64)
@@ -68,34 +68,76 @@ class Encoder(nn.Module):
     → Conv2d(256, 512, 4, 2, 1) + BN + ReLU → (512, 8, 8)
     → Flatten → Linear(512*8*8, 256)
     → Output: mu (128), logvar (128)
+
+    Architecture (512x512):
+    Input: (1, 512, 512)
+    → Conv2d(1, 32, 4, 2, 1) + BN + ReLU → (32, 256, 256)
+    → Conv2d(32, 64, 4, 2, 1) + BN + ReLU → (64, 128, 128)
+    → Conv2d(64, 128, 4, 2, 1) + BN + ReLU → (128, 64, 64)
+    → Conv2d(128, 256, 4, 2, 1) + BN + ReLU → (256, 32, 32)
+    → Conv2d(256, 256, 4, 2, 1) + BN + ReLU → (256, 16, 16)
+    → Conv2d(256, 512, 4, 2, 1) + BN + ReLU → (512, 8, 8)
+    → Conv2d(512, 512, 4, 2, 1) + BN + ReLU → (512, 4, 4)
+    → Flatten → Linear(512*4*4, 256)
+    → Output: mu (256), logvar (256)
     """
 
-    def __init__(self, latent_dim: int = 128):
+    def __init__(self, latent_dim: int = 128, image_size: int = 256):
         super().__init__()
         self.latent_dim = latent_dim
+        self.image_size = image_size
 
-        # 卷积编码器
-        self.conv_layers = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=4, stride=2, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1),
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1),
-            nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1),
-            nn.BatchNorm2d(512),
-            nn.ReLU(inplace=True),
-        )
-
-        # 压缩到 latent dim
-        self.fc_mu = nn.Linear(512 * 8 * 8, latent_dim)
-        self.fc_logvar = nn.Linear(512 * 8 * 8, latent_dim)
+        # 根据图像尺寸决定编码器层数
+        if image_size == 512:
+            # 512x512 需要 7 层 downsampling
+            self.conv_layers = nn.Sequential(
+                nn.Conv2d(1, 32, kernel_size=4, stride=2, padding=1),
+                nn.BatchNorm2d(32),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1),
+                nn.BatchNorm2d(64),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1),
+                nn.BatchNorm2d(128),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1),
+                nn.BatchNorm2d(256),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(256, 256, kernel_size=4, stride=2, padding=1),
+                nn.BatchNorm2d(256),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1),
+                nn.BatchNorm2d(512),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(512, 512, kernel_size=4, stride=2, padding=1),
+                nn.BatchNorm2d(512),
+                nn.ReLU(inplace=True),
+            )
+            # 512x512 → 4x4 feature map
+            self.fc_mu = nn.Linear(512 * 4 * 4, latent_dim)
+            self.fc_logvar = nn.Linear(512 * 4 * 4, latent_dim)
+        else:
+            # 256x256 需要 5 层 downsampling
+            self.conv_layers = nn.Sequential(
+                nn.Conv2d(1, 32, kernel_size=4, stride=2, padding=1),
+                nn.BatchNorm2d(32),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1),
+                nn.BatchNorm2d(64),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1),
+                nn.BatchNorm2d(128),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1),
+                nn.BatchNorm2d(256),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1),
+                nn.BatchNorm2d(512),
+                nn.ReLU(inplace=True),
+            )
+            # 256x256 → 8x8 feature map
+            self.fc_mu = nn.Linear(512 * 8 * 8, latent_dim)
+            self.fc_logvar = nn.Linear(512 * 8 * 8, latent_dim)
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -120,17 +162,17 @@ class Encoder(nn.Module):
 class FiLMDecoder(nn.Module):
     """带 FiLM 条件化的解码器
 
-    使用 Feature-wise Linear Modulation 将条件向量融入解码过程
+    支持 256x256 和 512x512 两种分辨率
 
-    Architecture:
+    Architecture (256x256):
     Input: z (128) + condition (3)
-    → 投影 condition → 256D style code
     → Linear(128, 512*8*8) → Reshape(512, 8, 8)
-    → ConvTranspose2d(512, 256, 4, 2, 1) + BN + ReLU + FiLM → (256, 16, 16)
-    → ConvTranspose2d(256, 128, 4, 2, 1) + BN + ReLU + FiLM → (128, 32, 32)
-    → ConvTranspose2d(128, 64, 4, 2, 1) + BN + ReLU + FiLM → (64, 64, 64)
-    → ConvTranspose2d(64, 32, 4, 2, 1) + BN + ReLU + FiLM → (32, 128, 128)
-    → ConvTranspose2d(32, 1, 4, 2, 1) + Sigmoid → (1, 256, 256)
+    → 5 层上采样 → (1, 256, 256)
+
+    Architecture (512x512):
+    Input: z (256) + condition (3)
+    → Linear(256, 512*4*4) → Reshape(512, 4, 4)
+    → 7 层上采样 → (1, 512, 512)
     """
 
     def __init__(
@@ -138,56 +180,119 @@ class FiLMDecoder(nn.Module):
         latent_dim: int = 128,
         condition_dim: int = 3,
         hidden_dim: int = 256,
+        image_size: int = 256,
     ):
         super().__init__()
         self.latent_dim = latent_dim
         self.hidden_dim = hidden_dim
+        self.image_size = image_size
 
         # 条件向量投影到 style code
         self.fc_cond = nn.Linear(condition_dim, hidden_dim)
 
-        # 隐向量投影到初始特征图
-        self.fc_z = nn.Linear(latent_dim, 512 * 8 * 8)
+        if image_size == 512:
+            # 512x512 需要 7 层上采样
+            self.fc_z = nn.Linear(latent_dim, 512 * 4 * 4)
 
-        # 上采样块
-        self.up_blocks = nn.ModuleList(
-            [
-                nn.Sequential(
-                    nn.ConvTranspose2d(512, 256, 4, 2, 1),
-                    nn.BatchNorm2d(256),
-                    nn.ReLU(inplace=True),
-                ),
-                nn.Sequential(
-                    nn.ConvTranspose2d(256, 128, 4, 2, 1),
-                    nn.BatchNorm2d(128),
-                    nn.ReLU(inplace=True),
-                ),
-                nn.Sequential(
-                    nn.ConvTranspose2d(128, 64, 4, 2, 1),
-                    nn.BatchNorm2d(64),
-                    nn.ReLU(inplace=True),
-                ),
-                nn.Sequential(
-                    nn.ConvTranspose2d(64, 32, 4, 2, 1),
-                    nn.BatchNorm2d(32),
-                    nn.ReLU(inplace=True),
-                ),
-            ]
-        )
+            # 7 层上采样：4x4 → 8x8 → 16x16 → 32x32 → 64x64 → 128x128 → 256x256 → 512x512
+            self.up_blocks = nn.ModuleList(
+                [
+                    nn.Sequential(
+                        nn.ConvTranspose2d(512, 512, 4, 2, 1),
+                        nn.BatchNorm2d(512),
+                        nn.ReLU(inplace=True),
+                    ),  # 4→8
+                    nn.Sequential(
+                        nn.ConvTranspose2d(512, 512, 4, 2, 1),
+                        nn.BatchNorm2d(512),
+                        nn.ReLU(inplace=True),
+                    ),  # 8→16
+                    nn.Sequential(
+                        nn.ConvTranspose2d(512, 256, 4, 2, 1),
+                        nn.BatchNorm2d(256),
+                        nn.ReLU(inplace=True),
+                    ),  # 16→32
+                    nn.Sequential(
+                        nn.ConvTranspose2d(256, 128, 4, 2, 1),
+                        nn.BatchNorm2d(128),
+                        nn.ReLU(inplace=True),
+                    ),  # 32→64
+                    nn.Sequential(
+                        nn.ConvTranspose2d(128, 64, 4, 2, 1),
+                        nn.BatchNorm2d(64),
+                        nn.ReLU(inplace=True),
+                    ),  # 64→128
+                    nn.Sequential(
+                        nn.ConvTranspose2d(64, 32, 4, 2, 1),
+                        nn.BatchNorm2d(32),
+                        nn.ReLU(inplace=True),
+                    ),  # 128→256
+                ]
+            )
 
-        # FiLM 参数生成器 (gamma, beta)
-        self.film_gammas = nn.ModuleList(
-            [nn.Linear(hidden_dim, channels) for channels in [256, 128, 64, 32]]
-        )
-        self.film_betas = nn.ModuleList(
-            [nn.Linear(hidden_dim, channels) for channels in [256, 128, 64, 32]]
-        )
+            # FiLM 参数生成器 (6 层)
+            channels_list = [512, 512, 256, 128, 64, 32]
+            self.film_gammas = nn.ModuleList(
+                [nn.Linear(hidden_dim, ch) for ch in channels_list]
+            )
+            self.film_betas = nn.ModuleList(
+                [nn.Linear(hidden_dim, ch) for ch in channels_list]
+            )
 
-        # 输出层
-        self.output_layer = nn.Sequential(
-            nn.ConvTranspose2d(32, 1, 4, 2, 1),
-            nn.Sigmoid(),
-        )
+            # 输出层：32 channels 256x256 → 1 channel 512x512
+            self.output_layer = nn.Sequential(
+                nn.ConvTranspose2d(32, 1, 4, 2, 1),
+                nn.Sigmoid(),
+            )
+        else:
+            # 256x256 需要 5 层上采样
+            self.fc_z = nn.Linear(latent_dim, 512 * 8 * 8)
+
+            # 5 层上采样：8x8 → 16x16 → 32x32 → 64x64 → 128x128 → 256x256
+            self.up_blocks = nn.ModuleList(
+                [
+                    nn.Sequential(
+                        nn.ConvTranspose2d(512, 256, 4, 2, 1),
+                        nn.BatchNorm2d(256),
+                        nn.ReLU(inplace=True),
+                    ),
+                    nn.Sequential(
+                        nn.ConvTranspose2d(256, 128, 4, 2, 1),
+                        nn.BatchNorm2d(128),
+                        nn.ReLU(inplace=True),
+                    ),
+                    nn.Sequential(
+                        nn.ConvTranspose2d(128, 64, 4, 2, 1),
+                        nn.BatchNorm2d(64),
+                        nn.ReLU(inplace=True),
+                    ),
+                    nn.Sequential(
+                        nn.ConvTranspose2d(64, 32, 4, 2, 1),
+                        nn.BatchNorm2d(32),
+                        nn.ReLU(inplace=True),
+                    ),
+                    nn.Sequential(
+                        nn.ConvTranspose2d(32, 16, 4, 2, 1),
+                        nn.BatchNorm2d(16),
+                        nn.ReLU(inplace=True),
+                    ),
+                ]
+            )
+
+            # FiLM 参数生成器
+            channels_list = [256, 128, 64, 32, 16]
+            self.film_gammas = nn.ModuleList(
+                [nn.Linear(hidden_dim, ch) for ch in channels_list]
+            )
+            self.film_betas = nn.ModuleList(
+                [nn.Linear(hidden_dim, ch) for ch in channels_list]
+            )
+
+            # 输出层
+            self.output_layer = nn.Sequential(
+                nn.ConvTranspose2d(16, 1, 4, 2, 1),
+                nn.Sigmoid(),
+            )
 
     def forward(
         self,
@@ -209,8 +314,11 @@ class FiLMDecoder(nn.Module):
         style = self.fc_cond(condition)  # (batch, hidden_dim)
 
         # 初始特征图
-        h = self.fc_z(z)  # (batch, 512*8*8)
-        h = h.view(batch_size, 512, 8, 8)
+        h = self.fc_z(z)
+        if self.image_size == 512:
+            h = h.view(batch_size, 512, 4, 4)  # 512x512: 4x4
+        else:
+            h = h.view(batch_size, 512, 8, 8)  # 256x256: 8x8
 
         # FiLM 调制的上采样
         for i, block in enumerate(self.up_blocks):
@@ -231,6 +339,7 @@ class cVAE(nn.Module):
     """条件变分自编码器
 
     结合 Encoder 和 FiLMDecoder，实现完整的 cVAE 模型
+    支持 256x256 和 512x512 两种分辨率
     """
 
     def __init__(
@@ -239,14 +348,18 @@ class cVAE(nn.Module):
         condition_dim: int = 3,
         film_hidden_dim: int = 256,
         beta: float = 1.0,
+        image_size: int = 256,
     ):
         super().__init__()
         self.latent_dim = latent_dim
         self.beta = beta
+        self.image_size = image_size
 
         # 组件
-        self.encoder = Encoder(latent_dim)
-        self.decoder = FiLMDecoder(latent_dim, condition_dim, film_hidden_dim)
+        self.encoder = Encoder(latent_dim, image_size)
+        self.decoder = FiLMDecoder(
+            latent_dim, condition_dim, film_hidden_dim, image_size
+        )
         self.condition_norm = ConditionNormalizer(condition_dim)
 
         # 优化器
@@ -403,11 +516,21 @@ def create_model(
     condition_dim: int = 3,
     film_hidden_dim: int = 256,
     beta: float = 1.0,
+    image_size: int = 256,
 ) -> cVAE:
-    """创建 cVAE 模型的便捷函数"""
+    """创建 cVAE 模型的便捷函数
+
+    Args:
+        latent_dim: 隐空间维度
+        condition_dim: 条件向量维度
+        film_hidden_dim: FiLM 隐藏层维度
+        beta: KL 损失权重
+        image_size: 输入图像尺寸 (256 或 512)
+    """
     return cVAE(
         latent_dim=latent_dim,
         condition_dim=condition_dim,
         film_hidden_dim=film_hidden_dim,
         beta=beta,
+        image_size=image_size,
     )
