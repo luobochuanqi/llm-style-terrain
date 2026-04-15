@@ -29,21 +29,26 @@ All commands run from `python-src/`:
 ```bash
 cd python-src
 
-# Run the terrain generator
-python main.py
-
 # Install dependencies (uv is the package manager)
 uv sync
 
-# Run a single test script
-python test.py
+# Run the terrain generator (main workflow)
+python main.py
 
-# Run demo scripts
-python mapgen_demo.py          # DiT map generation demo
-python heightmapstyle_demo.py  # Heightmap style transfer demo
-python gamelandscape_demo.py   # Game landscape demo
-python controlnet_demo.py      # ControlNet inference demo
+# Run a single test/demo script
+python test.py                   # Brownian bridge simulation demo
+
+# Run feature demo scripts
+python mapgen_demo.py            # DiT map generation demo
+python heightmapstyle_demo.py    # Heightmap style transfer demo
+python gamelandscape_demo.py     # Game landscape demo
+python controlnet_demo.py        # ControlNet inference demo
+
+# Utility scripts
+python tools/png2raw.py          # Convert PNG to RAW format
 ```
+
+Note: No formal linting, type checking, or test framework is configured. Demo scripts serve as manual tests.
 
 ## Key Requirements
 
