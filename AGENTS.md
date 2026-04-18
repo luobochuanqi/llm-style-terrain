@@ -2,132 +2,116 @@
 
 ## Project Overview
 
-Python project for generating terrain heightmaps: Perlin noise → SDXL image-to-image refinement.
+LLM-style terrain generation: Perlin noise → SDXL image-to-image refinement → Residual U-Net cVAE learned generation.
 
-## Structure
-
-```
-├── python-src/          # All Python code
-│   ├── main.py          # Entry point
-│   ├── src/
-│   │   ├── config.py    # Dataclass config (GeneratorConfig, DiffusionConfig, OutputConfig)
-│   │   ├── generators/  # Perlin noise generation (perlin.py)
-│   │   ├── diffusion/   # SDXL inference (sdxl_inference.py, controlnet_inference.py)
-│   │   ├── mapgen/      # DiT-based heightmap generation (experimental)
-│   │   ├── heightmapstyle/  # Heightmap style transfer
-│   │   └── gamelandscape/   # Game landscape generation
-│   ├── tools/           # Utility scripts (png2raw.py)
-│   ├── test.py          # Demo/test script (Brownian bridge simulation)
-│   ├── outputs/         # Generated files (gitignored)
-│   └── .venv/           # Virtual env (gitignored)
-```
-
-## Commands
-
-All commands run from `python-src/`:
+## Quick Reference
 
 ```bash
 cd python-src
-
-# Install dependencies (uv is the package manager)
-uv sync
-
-# Run the terrain generator (main workflow)
-python main.py
-
-# Run a single test/demo script
-python test.py                   # Brownian bridge simulation demo
-
-# Run feature demo scripts
-python mapgen_demo.py            # DiT map generation demo
-python heightmapstyle_demo.py    # Heightmap style transfer demo
-python gamelandscape_demo.py     # Game landscape demo
-python controlnet_demo.py        # ControlNet inference demo
-
-# Utility scripts
-python tools/png2raw.py          # Convert PNG to RAW format
+uv sync                    # Install deps (uv, not pip)
+uv run python main.py      # Main workflow: Perlin + SDXL
 ```
 
-Note: No formal linting, type checking, or test framework is configured. Demo scripts serve as manual tests.
+## Architecture
 
-## Key Requirements
+```
+python-src/
+├── main.py                    # Perlin + SDXL refinement
+├── train_unetcvae.py          # Residual U-Net cVAE training
+├── infer_unetcvae.py          # cVAE inference (generate/interpolate/batch)
+├── src/
+│   ├── config.py              # GeneratorConfig, DiffusionConfig, ControlNetConfig
+│   ├── generators/            # Perlin noise
+│   ├── diffusion/             # SDXL inference
+│   ├── train_unetcvae/        # cVAE model & training
+│   ├── dataprocess/           # 256×256 preprocessing
+│   └── dataprocess_512/       # 512×512 preprocessing
+├── tools/                     # PNG→RAW conversion utilities
+└── outputs/                   # All outputs (gitignored)
 
-- **Python 3.11+** (specified in `.python-version`)
-- **GPU required** for SDXL inference (uses `torch` with CUDA)
-- Uses `uv` for dependency management, not pip
-- No formal test suite - demo scripts serve as manual tests
+../data/training-dataset/      # External data directory (gitignored)
+```
+
+## Essential Commands
+
+### Main Workflow
+```bash
+cd python-src
+uv run python main.py              # Perlin → SDXL refinement
+```
+
+### cVAE Pipeline (Residual U-Net) ⭐
+```bash
+# Training (debug/fast/full modes)
+uv run python train_unetcvae.py --fast
+
+# Inference: generate from condition vector
+uv run python infer_unetcvae.py generate \
+    --checkpoint outputs/unetcvae/checkpoints/model_best.pth \
+    --condition "4.0 5.0 1.5" \
+    --output outputs/generated/danxia.png
+
+# Interpolation between styles
+uv run python infer_unetcvae.py interpolate \
+    --start "2.0 3.0 1.0" --end "5.0 6.0 2.5" --steps 10
+```
+
+### Data Preprocessing
+```bash
+# 256×256 pipeline
+uv run python -m src.dataprocess.preprocess
+uv run python -m src.dataprocess.extract_features
+uv run python -m src.dataprocess.visualize_features
+
+# 512×512 pipeline
+uv run python -m src.dataprocess_512.preprocess
+uv run python -m src.dataprocess_512.extract_features
+uv run python -m src.dataprocess_512.visualize_features
+```
+
+### Demo Scripts (no formal test framework)
+```bash
+uv run python test.py                # Brownian bridge demo
+uv run python mapgen_demo.py         # DiT generation
+uv run python heightmapstyle_demo.py # Style transfer
+uv run python gamelandscape_demo.py  # Game landscape generation
+uv run python controlnet_demo.py     # ControlNet
+```
 
 ## Configuration
 
-Edit `src/config.py` dataclasses:
-- `GeneratorConfig`: Perlin noise params (size=2^n, scale, octaves, seed)
-- `DiffusionConfig`: SDXL model, inference steps, prompts for Danxia landform
-- `ControlNetConfig`: ControlNet model, conditioning scale, canny thresholds
-- `OutputConfig`: output directories, filenames
+Edit `src/config.py`:
+- `GeneratorConfig`: Perlin params (n=2^10, scale=300, octaves=6)
+- `DiffusionConfig`: SDXL model, steps=25, strength=0.4 (low to preserve structure)
+- `ControlNetConfig`: Canny thresholds, conditioning_scale=0.5
 
-## Code Style Guidelines
+cVAE training config in `src/train_unetcvae/config.py` (modes: debug/fast/full).
 
-### Imports
-- Standard library imports first (sys, pathlib, numpy)
-- Third-party imports second (torch, diffusers, PIL)
-- Local imports third (from ..config import ...)
-- Use absolute imports within src/ package
+## Key Requirements
 
-### Formatting
-- 4 spaces for indentation (no tabs)
-- Maximum line length: 88 characters (follow PEP 8)
-- Use f-strings for string formatting
-- Type hints required for function signatures
+- **Python 3.11+**
+- **GPU required** for SDXL/cVAE (CUDA)
+- **VRAM**: ≥8GB for SDXL, ≥4-5GB for cVAE (with AMP)
+- Uses `uv` for dependency management
 
-### Naming Conventions
-- snake_case for functions, variables, modules
-- PascalCase for classes (e.g., PerlinHeightmapGenerator)
-- UPPER_CASE for constants
-- Descriptive names in English; Chinese comments allowed
+## Critical Gotchas
 
-### Types
-- Use `Optional[T]` for nullable values
-- Use `Union` for multiple types
-- Dataclasses for configuration (see `src/config.py`)
-- Explicit return type annotations
+- **SDXL downloads ~7GB on first run** - enable `enable_cpu_offload=True` to reduce VRAM
+- **Heightmap format**: grayscale PNG/RAW, black=valleys(0), white=peaks(255/65535)
+- **cVAE condition vector**: "S R C" = Sharpness(1-6), Ruggedness(1-7), Complexity(1-4)
+- **Danxia landform**: S=3.5-5.0, R=4.0-6.0, C=1.0-2.0
+- **喀斯特地貌 (Karst)**: S=2.0-4.0, R=4.0-6.5, C=1.5-3.0
+- **Data directory**: `../data/training-dataset/` (external, not in repo)
+- **All outputs in `outputs/` are gitignored**
 
-### Error Handling
-- Catch specific exceptions (e.g., `ValueError`, `KeyboardInterrupt`)
-- Use try/except blocks around model loading and inference
-- Print user-friendly error messages with emoji indicators:
-  - ✅ Success, ⚠️ Warning, ❌ Error, ⏭️ Skipped
+## Code Style
 
-### Documentation
-- Module docstrings at top of each file (triple-quoted, Chinese allowed)
-- Docstrings for all public functions and classes
-- Include Args, Returns, Raises sections for complex functions
+- Imports: stdlib → third-party → local (absolute within src/)
+- 4 spaces, 88 char max, f-strings, type hints required
+- Chinese comments acceptable
 
-### Comments
-- Chinese comments acceptable for internal documentation
-- Keep comments concise and meaningful
-- Use inline comments sparingly
+## No Formal Tooling
 
-## Outputs
-
-- `outputs/perlin/heightmap.raw` - Raw uint8 heightmap from Perlin noise
-- `outputs/diffusion/heightmap.png` - SDXL-refined heightmap as PNG
-- `outputs/controlnet/` - ControlNet output directory
-- `outputs/heightmapstyle/` - Style transfer outputs
-- `outputs/gamelandscape/` - Game landscape outputs
-- `outputs/mapgen/` - DiT map generation outputs
-
-## Gotchas
-
-- SDXL model downloads on first run (~7GB)
-- Enable `enable_cpu_offload=True` in config to reduce VRAM usage
-- Heightmaps are grayscale: black=valleys, white=peaks
-- Output format is `raw` binary for Perlin, `png` for diffusion result
-- All output directories are gitignored
-
-## Notes for Agents
-
-- No Cursor rules (.cursor/rules/ or .cursorrules) exist
-- No GitHub Copilot instructions (.github/copilot-instructions.md) exist
-- No formal linting or type checking configured yet
-- Code follows PEP 8 conventions with Chinese comments allowed
-- No pytest or unittest framework - use demo scripts for testing
+- No pytest/unittest - demo scripts serve as tests
+- No linting/typecheck configured
+- No pre-commit hooks
